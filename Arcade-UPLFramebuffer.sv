@@ -33,7 +33,6 @@ assign ADC_BUS  = 'Z;
 assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
-// SDRAM pins are driven by the controller inside upl_rom - tie-off removed.
 
 assign VGA_F1 = 0;
 assign VGA_SCALER = 0;
@@ -43,29 +42,27 @@ assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
 
+wire CLK_60M;
+wire [127:0] status;
+wire        ioctl_download;
+wire        pause_cpu;
 wire signed [15:0] audio_l, audio_r;
 assign AUDIO_L = pause_cpu ? 16'd0 : audio_l;
 assign AUDIO_R = pause_cpu ? 16'd0 : audio_r;
-assign AUDIO_S = 1;   // signed
-assign AUDIO_MIX = 0; // no mix, true stereo
+assign AUDIO_S = 1;
+assign AUDIO_MIX = 0;
 
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
 assign LED_USER  = ioctl_download;
 assign BUTTONS = 0;
 
-///////////////////////////////////////////////////
-
 wire [1:0] ar = status[14:13];
 
-// set_id: MRA index 5, captured inside upl_rom and exposed by the game top.
-//   0x00-0x0C ninjakd2 / mnight / arkarea / robokid (ROT0)   0x0D-0x0F omegaf (ROT270)
-//   0x10-0x19 nova2001.cpp (ROT0)                             0x1A xxmissio (ROT90)
 wire [7:0] set_id;
 wire is_xx       = (set_id == 8'h1A);
 wire is_vertical = ((set_id >= 8'h0D) && (set_id <= 8'h0F)) | is_xx;
 
-// Aspect keys off the same split as screen_rotate, so the two can never disagree.
 wire horz = ~is_vertical | status[12];
 
 assign VIDEO_ARX = horz ? ((!ar) ? 12'd4 : (ar - 1'd1)) : ((!ar) ? 12'd3 : (ar - 1'd1));
@@ -103,10 +100,8 @@ localparam CONF_STR = {
 
 wire        forced_scandoubler;
 wire  [1:0] buttons;
-wire [127:0] status;
 wire [10:0] ps2_key;
 
-wire        ioctl_download;
 wire        ioctl_upload;
 wire        ioctl_upload_req;
 wire  [7:0] ioctl_index;
@@ -151,15 +146,9 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.ps2_key(ps2_key)
 );
 
-////////////////////   CLOCKS   ///////////////////
-//   Fabric 60.000 MHz = 50 MHz refclk x 12/10 (integer PLL: M=12, N=1, C=10).
-//     60 / 10 = 6.0 MHz = XTAL 12 / 2 -> main Z80 + pixel clock
-//     60 / 12 = 5.0 MHz = 5 MHz XTAL  -> sound Z80
-//     60 / 40 = 1.5 MHz = XTAL 12 / 8 -> both YM2203
-wire CLK_60M;
 wire locked;
 
-wire        CLK_SDRAM;           // 60 MHz, same as CLK_60M at phase step 0
+wire        CLK_SDRAM;
 wire [63:0] reconfig_to_pll, reconfig_from_pll;
 
 pll pll
@@ -173,14 +162,10 @@ pll pll
     .reconfig_from_pll(reconfig_from_pll)
 );
 
-// SDRAM clock phase. One DPS step = 1/8 VCO period = 208 ps (600 MHz VCO), 80 per
-// 60 MHz period; each manual OSD step is 5. Position 0 reproduces the old fixed clock.
-// OSD Auto: upl_rom sweeps all 80 after each ROM load and requests the centre of the
-// widest clean window; each request is acked by flipping ph_tgl, moved or not.
 wire        cfg_waitrequest;
-reg         cfg_write = 1'b0;
-reg   [5:0] cfg_address;
-reg  [31:0] cfg_data;
+wire        cfg_write;
+wire  [5:0] cfg_address;
+wire [31:0] cfg_data;
 
 pll_cfg pll_cfg
 (
@@ -196,151 +181,54 @@ pll_cfg pll_cfg
     .reconfig_from_pll(reconfig_from_pll)
 );
 
-reg   [3:0] ph_s1 = 4'd0, ph_s2 = 4'd0;
-reg   [6:0] ph_cur = 7'd0, ph_tgt = 7'd0;
-reg   [2:0] ph_st = 3'd0;
-reg   [3:0] ph_dly = 4'd0;
-reg         ph_tgl = 1'b0;      // flips once per completed phase move
 wire        ph_auto = (status[31:28] == 4'd0);
 wire  [6:0] cal_ph;
 wire        cal_tgl, cal_hold;
-reg   [2:0] rq_s = 3'd0;
-reg         rq_pend = 1'b0;
-reg   [6:0] rq_val = 7'd0;
-wire        ph_auto50 = (ph_s2 == 4'd0);
-wire  [3:0] ph_km1 = ph_s2 - 4'd1;
-wire  [6:0] man_want = {1'b0, ph_km1, 2'b00} + {3'd0, ph_km1};
-wire  [6:0] ph_want = ph_auto50 ? rq_val : man_want;
-wire        ph_go   = ph_auto50 ? rq_pend : (man_want != ph_cur);
+wire        ph_tgl;
 
-always @(posedge CLK_50M) begin
-    ph_s1 <= status[31:28];
-    ph_s2 <= ph_s1;
-    if (cfg_write) begin
-        if (!cfg_waitrequest) cfg_write <= 1'b0;   // held until accepted
-    end else begin
-        case (ph_st)
-            3'd0: if (!cfg_waitrequest && ph_go) begin
-                if (ph_auto50) rq_pend <= 1'b0;
-                if (ph_want == ph_cur) ph_tgl <= ~ph_tgl;   // already there: ack only
-                else begin
-                    ph_tgt <= ph_want;
-                    cfg_address <= 6'd0; cfg_data <= 32'd0; cfg_write <= 1'b1;   // waitrequest mode
-                    ph_st <= 3'd1;
-                end
-            end
-            3'd1: begin   // DPS: [15:0] shifts, [20:16] counter C1, [21] up
-                cfg_address <= 6'd6;
-                cfg_data    <= (ph_tgt > ph_cur) ? {10'd0, 1'b1, 5'd1, 9'd0, ph_tgt - ph_cur}
-                                                 : {10'd0, 1'b0, 5'd1, 9'd0, ph_cur - ph_tgt};
-                cfg_write   <= 1'b1;
-                ph_st <= 3'd2;
-            end
-            3'd2: begin
-                cfg_address <= 6'd2; cfg_data <= 32'd0; cfg_write <= 1'b1;   // start
-                ph_dly <= 4'd0;
-                ph_st <= 3'd3;
-            end
-            3'd3: begin   // give waitrequest time to rise before trusting it low
-                ph_dly <= ph_dly + 4'd1;
-                if (&ph_dly) ph_st <= 3'd4;
-            end
-            3'd4: if (!cfg_waitrequest) begin
-                ph_cur <= ph_tgt;
-                ph_tgl <= ~ph_tgl;
-                ph_st  <= 3'd0;
-            end
-            default: ph_st <= 3'd0;
-        endcase
-    end
-    // Calibration request from the SDRAM domain; cal_ph is stable before the toggle.
-    rq_s <= {rq_s[1:0], cal_tgl};
-    if (rq_s[2] ^ rq_s[1]) begin rq_pend <= 1'b1; rq_val <= cal_ph; end
-end
+sdram_phase_ctl #(.CNT_SEL(5'd1), .MAN_STEP(7'd5)) phase_ctl
+(
+    .clk(CLK_50M),
+    .sel(status[31:28]),
+    .cal_val(cal_ph),
+    .cal_tgl(cal_tgl),
+    .ack_tgl(ph_tgl),
+    .cfg_waitrequest(cfg_waitrequest),
+    .cfg_write(cfg_write),
+    .cfg_address(cfg_address),
+    .cfg_data(cfg_data)
+);
 
-// Phase moved: re-measure the read latch in the SDRAM domain.
 reg [2:0] ph_tgl_s = 3'd0;
 always @(posedge CLK_60M) ph_tgl_s <= {ph_tgl_s[1:0], ph_tgl};
 wire rd_recal = ph_tgl_s[2] ^ ph_tgl_s[1];
 
 assign CLK_VIDEO = CLK_60M;
 
-// cal_hold keeps the game in reset through the phase sweep
 wire reset = RESET | status[0] | buttons[1] | ioctl_download | cal_hold;
 
-// SDRAM power-on reset. Must exclude ioctl_download: a reset including it holds the
-// load FSM idle for the whole transfer and no byte lands. High ~15 cycles, then low.
+// por_reset must exclude ioctl_download: with it the load FSM stays idle and no byte lands
 reg  [3:0] por_cnt = 4'd0;
 wire       por_reset = ~&por_cnt;
 always @(posedge CLK_60M) if (por_reset) por_cnt <= por_cnt + 1'b1;
 
-///////////////////         Keyboard           //////////////////
-
-// CTL-2026-10-25: original keyboard block, replaced by ctl_keyboard below
-// reg btn_up       = 0;
-// reg btn_down     = 0;
-// reg btn_left     = 0;
-// reg btn_right    = 0;
-// reg btn_attack   = 0;
-// reg btn_jump     = 0;
-// reg btn_coin1    = 0;
-// reg btn_coin2    = 0;
-// reg btn_1p_start = 0;
-// reg btn_2p_start = 0;
-// reg btn_pause    = 0;
-// reg btn_service  = 0;
-//
-// wire pressed = ~ps2_key[9];
-// wire [7:0] code = ps2_key[7:0];
-// always @(posedge CLK_60M) begin
-// 	reg old_state;
-// 	old_state <= ps2_key[10];
-// 	if(old_state != ps2_key[10]) begin
-// 		case(code)
-// 			'h16: btn_1p_start <= pressed; // 1 = Player 1 Start
-// 			'h1E: btn_2p_start <= pressed; // 2 = Player 2 Start
-// 			'h2E: btn_coin1    <= pressed; // 5 = Coin Input 1
-// 			'h36: btn_coin2    <= pressed; // 6 = Coin Input 2
-// 			'h4D: btn_pause    <= pressed; // P = Pause
-// 			'h46: btn_service  <= pressed; // 9 = Test Advance
-//
-// 			'h75: btn_up       <= pressed; // up         = Up
-// 			'h72: btn_down     <= pressed; // down       = Down
-// 			'h6B: btn_left     <= pressed; // left       = Left
-// 			'h74: btn_right    <= pressed; // right      = Right
-// 			'h14: btn_attack   <= pressed; // ctrl       = Attack
-// 			'h12: btn_jump     <= pressed; // left shift = Jump
-// 		endcase 
-// 	end
-// end
-// CTL-2026-10-25: keyboard -> controllers.sv ctl_keyboard. Keys now act on PRESS (the old `~ps2_key[9]` made them act
-// on release and stay held). Extended bit ignored = STD_EXT 0, as before. Extra-key table: left Shift (0x12, level,
-// either extended form) -> kbx[0] = Jump. No toggle keys, so pause changes nothing.
-wire        pause_cpu;   // CTL-2026-10-25: declared here (was in PAUSE SYSTEM below) so ctl_keyboard can take it
 wire [12:0] kb;
 wire  [0:0] kbx;
 ctl_keyboard #(.NX(1), .NXO(1), .XKEYS({24'h10_12_00})) keyboard
 	(.clk(CLK_60M), .ps2_key(ps2_key), .pause(pause_cpu), .kb(kb), .kbx(kbx));
-wire btn_up       = kb[0];    // up         = Up
-wire btn_down     = kb[1];    // down       = Down
-wire btn_left     = kb[2];    // left       = Left
-wire btn_right    = kb[3];    // right      = Right
-wire btn_attack   = kb[4];    // ctrl       = Attack
-wire btn_jump     = kbx[0];   // left shift = Jump
-wire btn_1p_start = kb[6];    // 1 = Player 1 Start
-wire btn_2p_start = kb[7];    // 2 = Player 2 Start
-wire btn_coin1    = kb[8];    // 5 = Coin Input 1
-wire btn_coin2    = kb[9];    // 6 = Coin Input 2
-wire btn_service  = kb[10];   // 9 = Test Advance
-wire btn_pause    = kb[12];   // P = Pause
+wire btn_up       = kb[0];
+wire btn_down     = kb[1];
+wire btn_left     = kb[2];
+wire btn_right    = kb[3];
+wire btn_attack   = kb[4];
+wire btn_jump     = kbx[0];
+wire btn_1p_start = kb[6];
+wire btn_2p_start = kb[7];
+wire btn_coin1    = kb[8];
+wire btn_coin2    = kb[9];
+wire btn_service  = kb[10];
+wire btn_pause    = kb[12];
 
-//////////////////  Game select (mod byte, MRA <rom index="5">)  ///////////////////////////
-
-//////////////////  Arcade Buttons/Interfaces   ///////////////////////////
-
-// Every UPL set here is 2-button (ninjakd2.cpp INPUT_PORTS common / common_2p).
-
-//Player 1
 wire m_up1      = btn_up        | joystick_0[3];
 wire m_down1    = btn_down      | joystick_0[2];
 wire m_left1    = btn_left      | joystick_0[1];
@@ -348,7 +236,6 @@ wire m_right1   = btn_right     | joystick_0[0];
 wire m_attack1  = btn_attack    | joystick_0[4];
 wire m_jump1    = btn_jump      | joystick_0[5];
 
-//Player 2 (cocktail)
 wire m_up2      = btn_up        | joystick_1[3];
 wire m_down2    = btn_down      | joystick_1[2];
 wire m_left2    = btn_left      | joystick_1[1];
@@ -356,17 +243,14 @@ wire m_right2   = btn_right     | joystick_1[0];
 wire m_attack2  = btn_attack    | joystick_1[4];
 wire m_jump2    = btn_jump      | joystick_1[5];
 
-//Start/Coin
 wire m_coin1    = btn_coin1     | joystick_0[6];
 wire m_coin2    = btn_coin2     | joystick_1[6];
 wire m_start1   = btn_1p_start  | joystick_0[7];
 wire m_start2   = btn_2p_start  | joystick_0[8];
 wire m_pause    = btn_pause     | joystick_0[9];
 
-//Service Mode
 wire m_service  = btn_service                  ;
 
-// Hook for a 180 deg control transform if a set ever needs it; unused on UPL.
 wire ctrl_flip_ud = 1'b0;
 
 wire m_up1_c   = ctrl_flip_ud ? m_down1 : m_up1;
@@ -379,19 +263,13 @@ wire m_right1_c = ctrl_flip_ud ? m_left1  : m_right1;
 wire m_left2_c  = ctrl_flip_ud ? m_right2 : m_left2;
 wire m_right2_c = ctrl_flip_ud ? m_left2  : m_right2;
 
-// MAME port assembly (ninjakd2.cpp:1156). All UPL inputs are IP_ACTIVE_LOW.
-//   KEYCOIN: 0 START1  1 START2  4 SERVICE  6 COIN1  7 COIN2
-//   PAD:     0 RIGHT   1 LEFT    2 DOWN     3 UP     4 BUTTON1  5 BUTTON2
 wire [7:0] keycoin_port = ~{m_coin2, m_coin1, 1'b0, m_service, 1'b0, 1'b0, m_start2, m_start1};
 wire [7:0] pad1_port    = ~{2'b00, m_jump1, m_attack1, m_up1_c, m_down1_c, m_left1_c, m_right1_c};
 wire [7:0] pad2_port    = ~{2'b00, m_jump2, m_attack2, m_up2_c, m_down2_c, m_left2_c, m_right2_c};
 
-// Hiscore is DISABLED: restore corrupts loaded data, cause not found. Tied off here,
-// and index 3 is commented out in every MRA. To re-enable, instantiate hiscore (the
-// standard block is in any sibling core), drive the wires below, and restore index 3.
 wire [15:0] hs_address      = 16'd0;
 wire  [7:0] hs_data_in      = 8'd0;
-wire  [7:0] hs_data_out     = 8'd0;       // hiscore disabled; nothing drives this
+wire  [7:0] hs_data_out     = 8'd0;
 wire        hs_write_enable = 1'b0;
 wire        hs_access_read  = 1'b0;
 wire        hs_access_write = 1'b0;
@@ -400,8 +278,6 @@ wire        hs_configured   = 1'b0;
 assign      ioctl_din       = 8'd0;
 assign      ioctl_upload_req = 1'b0;
 
-// PAUSE SYSTEM
-// wire pause_cpu;   // CTL-2026-10-25: moved up to the keyboard block
 wire [23:0] rgb_out;
 pause #(8,8,8,60) pause
 (
@@ -412,20 +288,17 @@ pause #(8,8,8,60) pause
 	.options(~status[26:25])
 );
 
-///////////////                 Video                  ////////////////
-
 wire hblank, vblank;
 wire hs, vs;
 wire [7:0] r, g, b;
 wire ce_pix;
 
-// omegaf (set_id 0x0D-0x0F) is ROT270, xxmissio (0x1A) ROT90; every other UPL set here is ROT0.
-wire rotate_ccw  = ~is_xx;                                  // ROT270 = counter-clockwise
+wire rotate_ccw  = ~is_xx;
 wire no_rotate   = ~is_vertical | status[12] | direct_video;
 wire flip        = status[11];
 screen_rotate screen_rotate(.*);
 
-arcade_video #(512,24) arcade_video                         // xxmissio is 512 wide
+arcade_video #(512,24) arcade_video
 (
 	.*,
 
@@ -440,7 +313,6 @@ arcade_video #(512,24) arcade_video                         // xxmissio is 512 w
 	.fx(status[17:15])
 );
 
-// DIP switch
 reg [7:0] dip_sw[8] = '{8'h00,8'h00,8'h00,8'h00,8'h00,8'h00,8'h00,8'h00};
 always @(posedge CLK_60M) begin
 	if (ioctl_wr && (ioctl_index == 8'd254) && !ioctl_addr[24:3])
@@ -448,14 +320,12 @@ always @(posedge CLK_60M) begin
 end
 wire [7:0] sw0 = dip_sw[0];
 
-// OSD lists Auto,Normal,Early,Late,Later; upl_rom encodes 0=Early 1=Normal 2=Late
-// 3=Later. Auto measures the latch after the ROM download, Normal is the fallback.
 wire       rd_auto = (status[21:19] == 3'd0);
 wire [1:0] rd_mode = (status[21:19] == 3'd2) ? 2'd0 :
                      (status[21:19] == 3'd3) ? 2'd2 :
                      (status[21:19] == 3'd4) ? 2'd3 : 2'd1;
 
-UPLFramebuffer uplframebuffer_inst
+uplframebuffer_dispatcher uplframebuffer_inst
 (
 	.reset(reset),
 	.por_reset(por_reset),
@@ -489,9 +359,9 @@ UPLFramebuffer uplframebuffer_inst
 	.ioctl_download(ioctl_download),
 	.ioctl_wait(ioctl_wait),
 
-	.crt_flip(status[22]),          // CRT Flip
-	.h_adj(status[35:32]),          // CRT position: + moves the picture right, 2 px per step
-	.v_adj(status[39:36]),          //               + moves it down, 1 line per step
+	.crt_flip(status[22]),
+	.h_adj(status[35:32]),
+	.v_adj(status[39:36]),
 
 	.pause(pause_cpu),
 
@@ -506,11 +376,9 @@ UPLFramebuffer uplframebuffer_inst
 
 	.SDRAM_DQ(SDRAM_DQ), .SDRAM_A(SDRAM_A), .SDRAM_DQML(SDRAM_DQML), .SDRAM_DQMH(SDRAM_DQMH),
 	.SDRAM_BA(SDRAM_BA), .SDRAM_nCS(SDRAM_nCS), .SDRAM_nWE(SDRAM_nWE), .SDRAM_nRAS(SDRAM_nRAS),
-	// SDRAM_CLK is driven from CLK_SDRAM below
 	.SDRAM_nCAS(SDRAM_nCAS), .SDRAM_CKE(SDRAM_CKE), .SDRAM_CLK()
 );
 
-// SDRAM_CLK: same inverted DDR output as sdram.sv's, on the phase-steppable CLK_SDRAM.
 altddio_out
 #(
 	.extend_oe_disable("OFF"),
@@ -535,6 +403,5 @@ sdramclk_ddr
 	.sclr(1'b0),
 	.sset(1'b0)
 );
-
 
 endmodule

@@ -1,28 +1,21 @@
-//============================================================================
-//
-//  UPLFramebuffer_VIDEO.sv — raster, palette, foreground tilemap and layer mix.
-//  Layer order and palette bases from ninjakd2.cpp screen_update_*.
-//
-//============================================================================
+//  Based on MAME ninjakd2.cpp (Roberto Ventura, Leandro Dardini, Yochizo, Nicola Salmoria, BSD-3-Clause)
 
 module UPLFramebuffer_VIDEO
 (
     input               clk,
-    input               cen_pix,         // pixel clock enable (target 6.0 MHz)
+    input               cen_pix,
     input               reset,
 
     input               flip_screen,
-    input  signed [3:0] h_adj,           // CRT position: + = sync 2 px earlier = picture right
-    input  signed [3:0] v_adj,           //               + = sync 1 line earlier = picture down
-    input               bg_mnight,       // mnight/arkarea bg tile decode (11-bit index)
-    input               gfx_robokid,      // robokid/omegaf palette bases, gfx col order, 5-bit RGB
-    input               is_omegaf,        // bg map is 128x32 tiles, not 32x32
+    input  signed [3:0] h_adj,
+    input  signed [3:0] v_adj,
+    input               bg_mnight,
+    input               gfx_robokid,
+    input               is_omegaf,
 
-    // ---- fg tilemap RAM (in MAIN)
     output       [10:0] fg_vram_addr,
     input         [7:0] fg_vram_data,
 
-    // ---- bg tilemap RAM (in MAIN) and its scroll/enable registers
     output       [12:0] bg0_vram_addr,   input [7:0] bg0_vram_data,
     output       [12:0] bg1_vram_addr,   input [7:0] bg1_vram_data,
     output       [12:0] bg2_vram_addr,   input [7:0] bg2_vram_data,
@@ -31,23 +24,19 @@ module UPLFramebuffer_VIDEO
     input        [15:0] bg2_scrollx, bg2_scrolly,
     input         [2:0] bg_layer_en,
 
-    // ---- bg tile ROM (SDRAM, via upl_rom)
     output       [18:0] tile1_addr,  output tile1_req,  input tile1_ack,  input [7:0] tile1_data,
     output       [18:0] tile2_addr,  output tile2_req,  input tile2_ack,  input [7:0] tile2_data,
     output       [18:0] tile3_addr,  output tile3_req,  input tile3_ack,  input [7:0] tile3_data,
 
-    // ---- char ROM (SDRAM, via upl_rom)
     output       [14:0] char_addr,
     output              char_req,
     input               char_ack,
     input         [7:0] char_data,
 
-    // ---- sprite framebuffer (in UPLFramebuffer_SPRITE)
     output       [15:0] fb_raddr,
     input         [7:0] fb_rdata,
-    output              spr_draw_window,   // vblank rendering window for the engine
+    output              spr_draw_window,
 
-    // ---- palette (in MAIN)
     output        [9:0] pal_index,
     input        [15:0] pal_rgb,
 
@@ -60,18 +49,15 @@ module UPLFramebuffer_VIDEO
     output        [7:0] B
 );
 
-    // Video timing (ninjakd2.cpp: 59.61 Hz). v_cnt IS the tilemap row.
-    //   6.0 MHz pixel, H_TOTAL 384 -> 15.625 kHz H, V_TOTAL 262 -> 59.637 Hz V
-
     localparam H_TOTAL   = 9'd384;
     localparam H_VIS     = 9'd256;
-    localparam HS_START  = 9'd292;    // centred in blanking: 36 px front porch, 60 back
+    localparam HS_START  = 9'd292;
     localparam HS_END    = 9'd324;
 
     localparam V_TOTAL   = 9'd262;
-    localparam V_VIS_LO  = 9'd32;    // MAME visarea min_y
-    localparam V_VIS_HI  = 9'd224;   // one past max_y (223)
-    localparam VS_START  = 9'd251;    // centred in blanking: 27 lines front porch, 40 back
+    localparam V_VIS_LO  = 9'd32;
+    localparam V_VIS_HI  = 9'd224;
+    localparam VS_START  = 9'd251;
     localparam VS_END    = 9'd254;
 
     reg [8:0] h_cnt = 9'd0;
@@ -91,7 +77,6 @@ module UPLFramebuffer_VIDEO
         end
     end
 
-    // fg+bg use ~85% of the SDRAM arbiter, so the sprite engine gets vblank alone.
     wire fetch_en = (v_cnt >= V_VIS_LO - 9'd2) && (v_cnt < V_VIS_HI);
     assign spr_draw_window = !fetch_en;
 
@@ -99,28 +84,20 @@ module UPLFramebuffer_VIDEO
 
     wire hblank_raw = (h_cnt >= H_VIS);
     wire vblank_raw = (v_cnt < V_VIS_LO) || (v_cnt >= V_VIS_HI);
-    // OSD position moves the sync pulses only; blanking stays put. Range keeps both inside blanking.
     wire [8:0] hs_on    = HS_START - {{4{h_adj[3]}}, h_adj, 1'b0};
     wire [8:0] vs_on    = VS_START - {{5{v_adj[3]}}, v_adj};
     wire hsync_raw  = (h_cnt >= hs_on) && (h_cnt < hs_on + (HS_END - HS_START));
     wire vsync_raw  = (v_cnt >= vs_on) && (v_cnt < vs_on + (VS_END - VS_START));
 
-    // Foreground tilemap fetch: one 8-pixel group fetched while the previous is
-    // displayed. ninjakd2.cpp get_fg_tile_info:
-    //   tile   = ((hi & 0xc0) << 2) | lo
-    //   flipyx = (hi >> 4) & 3
-    //   color  = hi & 0x0f, palette base 0x200
-
     wire [8:0] h_next   = (h_cnt >= H_TOTAL - 9'd8) ? (h_cnt - (H_TOTAL - 9'd8)) : (h_cnt + 9'd8);
     wire [8:0] v_fetch  = (h_cnt >= H_TOTAL - 9'd8) ? ((v_cnt == V_TOTAL - 1'd1) ? 9'd0 : v_cnt + 1'd1) : v_cnt;
 
-    // screen->tilemap coordinates, with screen flip
     wire [7:0] fx = flip_screen ? (8'd255 - h_next[7:0])  : h_next[7:0];
     wire [7:0] fy = flip_screen ? (8'd255 - v_fetch[7:0]) : v_fetch[7:0];
 
     reg  [3:0] st = 4'd0;
     reg  [7:0] tlo = 8'd0, thi = 8'd0;
-    reg [31:0] rowbits_n = 32'd0;   // next group's 8 pixels, 4bpp packed MSB
+    reg [31:0] rowbits_n = 32'd0;
     reg  [3:0] color_n = 4'd0;
     reg        flipx_n = 1'b0;
     reg [31:0] rowbits = 32'd0;
@@ -145,7 +122,6 @@ module UPLFramebuffer_VIDEO
             st <= 4'd0; char_req_r <= 1'b0;
         end else begin
             if (cen_pix && (h_cnt[2:0] == 3'd7)) begin
-                // hand the completed group to the display side and restart
                 rowbits <= rowbits_n;
                 color   <= color_n;
                 flipx   <= flipx_n;
@@ -153,7 +129,7 @@ module UPLFramebuffer_VIDEO
             end else begin
                 case (st)
                     4'd0: begin fg_addr_r <= {tile_index, 1'b0}; st <= 4'd1; end
-                    4'd1: st <= 4'd2;                                  // BRAM latency
+                    4'd1: st <= 4'd2;
                     4'd2: begin tlo <= fg_vram_data; fg_addr_r <= {tile_index, 1'b1}; st <= 4'd3; end
                     4'd3: st <= 4'd4;
                     4'd4: begin
@@ -175,9 +151,6 @@ module UPLFramebuffer_VIDEO
             end
         end
     end
-
-    // Three identical bg layers (ninjakd2.cpp robokid_get_bg_tile_info<Layer>).
-    // Single-layer sets hold bg_layer_en[2:1] low, idling layers 1 and 2.
 
     wire [3:0] bg0_color, bg0_pix, bg1_color, bg1_pix, bg2_color, bg2_pix;
 
@@ -215,35 +188,22 @@ module UPLFramebuffer_VIDEO
         .color(bg2_color), .pix(bg2_pix)
     );
 
-    // Transparent pen 0xf, except robokid's bg0 and the single-layer sets
-    // (VIDEO_START_robokid sets it on tilemaps 1 and 2 only; _omegaf on all three).
     wire bg0_op = bg_layer_en[0] && (is_omegaf ? (bg0_pix != 4'hF) : 1'b1);
     wire bg1_op = bg_layer_en[1] && (bg1_pix != 4'hF);
     wire bg2_op = bg_layer_en[2] && (bg2_pix != 4'hF);
 
-    // All three bg layers share palette base 0x000 (GFXDECODE entries 2/3/4).
     wire [9:0] bg0_index = {2'b00, bg0_color, bg0_pix};
     wire [9:0] bg1_index = {2'b00, bg1_color, bg1_pix};
     wire [9:0] bg2_index = {2'b00, bg2_color, bg2_pix};
 
-    // Pixel out. Palette RAM adds a cycle, so the syncs are delayed to match.
-
-    // Screen flip mirrors inside the tile, so it XORs with the tile's own flipx.
     wire [2:0] px    = (flipx ^ flip_screen) ? ~h_cnt[2:0] : h_cnt[2:0];
-    wire [4:0] shift = {2'd0, ~px} << 2;          // nibble 7 is the leftmost pixel
+    wire [4:0] shift = {2'd0, ~px} << 2;
     wire [3:0] pix   = (rowbits >> shift) & 32'hF;
 
-    // fb_rdata is {colour, pen}; the engine never writes pen 0xf, so 0xf = empty.
     wire spr_opaque = (fb_rdata[3:0] != 4'hF);
 
-    // fg transparent pen is 0xF, not 0 (ninjakd2.cpp:449 set_transparent_pen).
     wire fg_opaque = (pix != 4'hF);
 
-    // GFXDECODE palette bases: ninjakd2 fg 0x200 / spr 0x100, robokid fg 0x300 /
-    // spr 0x200; bg 0x000 for both. Draw order back to front (screen_update_*):
-    //   ninjakd2/mnight : bg0, sprites, fg
-    //   robokid         : bg0, bg1, sprites, bg2, fg
-    //   omegaf          : bg0, bg1, bg2, sprites, fg
     wire top_is_bg2 = bg2_op && !is_omegaf;
 
     assign pal_index = fg_opaque   ? {gfx_robokid ? 2'b11 : 2'b10, color, pix}
@@ -254,7 +214,7 @@ module UPLFramebuffer_VIDEO
                      : bg0_op      ? bg0_index
                                    : 10'd0;
 
-    // Colour and syncs must latch on the SAME pipeline stage.
+    // colour and syncs must latch on the same pipeline stage
     reg [15:0] rgb_lat = 16'd0;
     reg        hs_lat  = 1'b0, vs_lat = 1'b0, hb_lat = 1'b1, vb_lat = 1'b1;
 
@@ -273,8 +233,6 @@ module UPLFramebuffer_VIDEO
 
     wire visible = ~hb_lat & ~vb_lat;
 
-    // robokid: RRRRGGGGBBBBRGBx (5 bits/channel, LSBs in the low nibble).
-    // everything else: RGBx_444.
     wire [4:0] r5 = {rgb_lat[15:12], rgb_lat[3]};
     wire [4:0] g5 = {rgb_lat[11:8],  rgb_lat[2]};
     wire [4:0] b5 = {rgb_lat[7:4],   rgb_lat[1]};

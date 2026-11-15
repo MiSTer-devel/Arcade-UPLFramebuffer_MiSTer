@@ -1,39 +1,31 @@
-//============================================================================
-//
-//  UPLFramebuffer_SND.sv — UPL sound board: Z80 @ 5 MHz + 2x YM2203 @ 1.5 MHz.
-//  Maps from ninjakd2.cpp:1121 (memory) and :1141 (I/O).
-//
-//============================================================================
+//  Based on MAME ninjakd2.cpp (Roberto Ventura, Leandro Dardini, Yochizo, Nicola Salmoria, BSD-3-Clause)
 
 module UPLFramebuffer_SND
 (
-    input                clk,            // 60 MHz fabric
-    input                cen_cpu,        // 5.0 MHz  (sound Z80)
-    input                cen_ym,         // 1.5 MHz  (both YM2203)
+    input                clk,
+    input                cen_cpu,
+    input                cen_ym,
     input                reset,
     input                pause,
 
-    // ---- from the main board
     input         [7:0]  sound_latch,
     input                sound_latch_wr,
 
-    // ---- sound CPU ROM, 0000-BFFF
     output       [15:0]  rom_addr,
     input         [7:0]  rom_data,
-    output               rom_m1,         // opcode fetch; MC8123 decrypted-opcode select
+    output               rom_m1,
 
-    // ---- PCM sample trigger, ninjakd2 only (ninjakd2_pcm_play_w)
     output        [7:0]  pcm_cmd,
     output               pcm_cmd_wr,
 
-
     output signed [15:0] sound_out,
 
-    // ---- shared sound Z80 + YM2203 pair (rtl/UPLFramebuffer.sv)
     output chip_pool_pkg::z80r_i_t         z80_i,
     input  chip_pool_pkg::z80_o_t          z80_o,
     output chip_pool_pkg::ym2203_i_t [1:0] ym_i,
-    input  chip_pool_pkg::ym2203_o_t [1:0] ym_o
+    input  chip_pool_pkg::ym2203_o_t [1:0] ym_o,
+    output ram_pool_pkg::pram_i_t          ram_i,
+    input  ram_pool_pkg::pram_o_t          ram_o
 );
 
     wire [15:0] A        = z80_o.a;
@@ -45,31 +37,23 @@ module UPLFramebuffer_SND
     wire        m1_n     = z80_o.m1_n;
 
     wire mem_wr = ~mreq_n & ~wr_n;
-    wire io_wr  = ~iorq_n & ~wr_n & m1_n;   // m1_n excludes the interrupt-ack cycle
+    wire io_wr  = ~iorq_n & ~wr_n & m1_n;
     wire io_rd  = ~iorq_n & ~rd_n & m1_n;
 
-    // Memory decode: 0000-BFFF ROM, C000-C7FF RAM, E000 latch, F000 PCM
-    // (mnight_soundcpu.dasm $00E5: ld a,($E000)).
-
-    wire cs_rom   = (A[15:14] != 2'b11);        // 0000-BFFF
-    wire cs_ram   = (A[15:11] == 5'b11000);     // C000-C7FF
+    wire cs_rom   = (A[15:14] != 2'b11);
+    wire cs_ram   = (A[15:11] == 5'b11000);
     wire cs_latch = (A == 16'hE000);
     wire cs_pcm   = (A == 16'hF000);
 
     assign rom_addr = A;
     assign rom_m1   = ~m1_n;
 
-    // Sound latch (MAME GENERIC_LATCH_8): written by the main CPU, read here.
-
-    // MAME's generic_latch_8 is not cleared by the sound CPU's reset line, so a
-    // command written while the CPU is held must survive until it is released.
+    // not cleared by the sound CPU reset: a command written while it is held must survive
     reg [7:0] latch_reg = 8'd0;
 
     always_ff @(posedge clk) begin
         if (sound_latch_wr) latch_reg <= sound_latch;
     end
-
-    // PCM sample command latch; every game writes 0xF0 (silence) here.
 
     reg [7:0] pcm_reg = 8'd0;
     reg       pcm_wr  = 1'b0;
@@ -85,32 +69,19 @@ module UPLFramebuffer_SND
     assign pcm_cmd    = pcm_reg;
     assign pcm_cmd_wr = pcm_wr;
 
-    // Work RAM, C000-C7FF (2KB)
-
     wire [7:0] ram_dout;
 
-    dpram_dc #(.widthad_a(11), .width_a(8)) sound_ram
-    (
-        .clock_a(clk),
-        .address_a(A[10:0]),
-        .data_a(cpu_dout),
-        .wren_a(cen_cpu & mem_wr & cs_ram),
-        .q_a(ram_dout),
+    assign ram_i.a_addr = {5'd0, A[10:0]};
+    assign ram_i.a_d    = cpu_dout;
+    assign ram_i.a_we   = cen_cpu & mem_wr & cs_ram;
+    assign ram_i.b_addr = 16'd0;
+    assign ram_i.b_d    = 8'd0;
+    assign ram_i.b_we   = 1'b0;
+    assign ram_dout     = ram_o.a_q;
 
-        .clock_b(clk),
-        .address_b(11'd0),
-        .data_b(8'd0),
-        .wren_b(1'b0),
-        .q_b()
-    );
-
-    // 2x YM2203. I/O $00-$01 = chip 1, $80-$81 = chip 2, A0 selects address/data;
-    // only chip 1 drives the Z80 IRQ (ninjakd2.cpp:1581).
-    // jt12_mmr's register block is NOT cen-gated, so a held write re-executes every
-    // clock and re-triggers key-on: the strobe must be exactly one clk wide.
-
-    wire ym1_sel = io_wr & (A[7:1] == 7'b0000000);   // $00-$01
-    wire ym2_sel = io_wr & (A[7:1] == 7'b1000000);   // $80-$81
+    // jt12_mmr's register block is not cen-gated: the write strobe must be exactly one clk wide
+    wire ym1_sel = io_wr & (A[7:1] == 7'b0000000);
+    wire ym2_sel = io_wr & (A[7:1] == 7'b1000000);
 
     reg ym1_sel_d = 1'b0, ym2_sel_d = 1'b0;
     always_ff @(posedge clk) begin
@@ -118,7 +89,6 @@ module UPLFramebuffer_SND
         ym2_sel_d <= ym2_sel;
     end
 
-    // Gated on ~reset: jt12_mmr flags a write during reset as a glue-logic error.
     wire ym1_wr = ym1_sel & ~ym1_sel_d & ~reset;
     wire ym2_wr = ym2_sel & ~ym2_sel_d & ~reset;
 
@@ -142,18 +112,13 @@ module UPLFramebuffer_SND
 
     wire  [7:0] ym1_dout  = ym_o[0].dout;
     wire  [7:0] ym2_dout  = ym_o[1].dout;
-    wire        ym1_irq_n = ym_o[0].irq_n;   // chip 2 does not drive the IRQ line
+    wire        ym1_irq_n = ym_o[0].irq_n;
     wire signed [15:0] ym1_snd = ym_o[0].snd;
     wire signed [15:0] ym2_snd = ym_o[1].snd;
-
-    // Mix. jt03's snd already carries jotego's FM/SSG balance, so just sum and halve.
 
     wire signed [16:0] snd_sum = {ym1_snd[15], ym1_snd} + {ym2_snd[15], ym2_snd};
 
     assign sound_out = pause ? 16'sd0 : snd_sum[16:1];
-
-    // CPU read mux + Z80. MAME maps the YM ports write-only, but the sound program
-    // reads them (mnight_soundcpu.dasm: in a,($01)), so the read path is wired.
 
     reg [7:0] cpu_din;
 

@@ -33,8 +33,7 @@
         <dip bits="15" name="Difficulty" ids="Hard,Normal"/>
     </switches>
 
-    <!-- Index 0: program 0000-7FFF (CPU 2 runs from 4000-7FFF), gfx1 at 0x8000, gfx2 at 0x10000, file by file
-         (MAME's lineswap is decoded in the core) -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="raiders5ta.zip|raiders5.zip">
         <part name="1.4c" crc="e6264952"/>
         <part name="2.4d" crc="06f7c5b0"/>
@@ -43,7 +42,7 @@
         <part name="5.11n" crc="fb532e4d"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>19</part></rom>
 
     <remark>Raiders5 (UPL, Taito license; possibly bootleg)</remark>

@@ -32,8 +32,7 @@
         <dip bits="11,12" name="Bonus Every" ids="None,70000,90000,50000"/>
     </switches>
 
-    <!-- Index 0: main 0000-7FFF, then the bank image: sub banks 0-5 at 0x00000, chars / sprites at 0x20000, file by
-         file (MAME's ROM_LOAD16_BYTE pairing is decoded in the core) -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="xxmissio.zip">
         <part name="xx1.4l" crc="86e07709"/>
         <part name="xx3.6a" crc="16fdacab"/>
@@ -46,23 +45,23 @@
         <part name="xx7.8h" crc="abe9cd68"/>
     </rom>
 
-    <!-- Index 1: sub CPU 0000-3FFF -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="xxmissio.zip">
         <part name="xx2.4b" crc="13fa7049"/>
     </rom>
 
-    <!-- Index 2: SDRAM clock-phase calibration reference only (the char region is not read on this board) -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="xxmissio.zip">
         <part name="xx10.4c" crc="d27d7834"/>
     </rom>
 
-    <!-- Index 7: bg tiles, file by file -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="xxmissio.zip">
         <part name="xx10.4c" crc="d27d7834"/>
         <part name="xx11.4b" crc="d9dd827c"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>1A</part></rom>
 
     <remark>XX Mission (UPL)</remark>

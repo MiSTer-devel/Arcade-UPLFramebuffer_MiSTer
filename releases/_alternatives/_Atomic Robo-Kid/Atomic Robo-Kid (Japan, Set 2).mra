@@ -35,7 +35,7 @@
         <dip bits="13,15" name="Coinage" ids="5 Coins/1 Credit,4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/4 Credits,1 Coin/3 Credits,1 Coin/2 Credits,1 Coin/1 Credit"/>
     </switches>
 
-    <!-- Index 0: Main CPU. 0x8000 fixed, then banks -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="1_rom29.18j" crc="969fb951" length="0x8000"/>
         <part name="1_rom29.18j" crc="969fb951"/>
@@ -44,17 +44,17 @@
         <part name="robokid4.12k" crc="3bc3977f"/>
     </rom>
 
-    <!-- Index 1: Sound CPU -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="robokid.k7" crc="f490a2e9"/>
     </rom>
 
-    <!-- Index 2: FG char ROM -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="robokid.b9" crc="fac59c3f"/>
     </rom>
 
-    <!-- Index 6: Sprite ROM -->
+    <!-- Index 6: ROM -->
     <rom index="6" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="robokid.15f" crc="ba61f5ab"/>
         <part name="robokid.16f" crc="d9b399ce"/>
@@ -62,7 +62,7 @@
         <part name="robokid.18f" crc="a0aa2a84"/>
     </rom>
 
-    <!-- Index 7: BG tile ROM 1 -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="robokid.19c" crc="02220421"/>
         <part name="robokid.20c" crc="02d59bc2"/>
@@ -74,7 +74,7 @@
         <part repeat="0x10000">00</part>
     </rom>
 
-    <!-- Index 8: BG tile ROM 2 -->
+    <!-- Index 8: ROM -->
     <rom index="8" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="robokid.12c" crc="0ab45f94"/>
         <part name="robokid.14c" crc="029bbd4a"/>
@@ -86,7 +86,7 @@
         <part name="robokid.16d" crc="18d92b2b"/>
     </rom>
 
-    <!-- Index 9: BG tile ROM 3 -->
+    <!-- Index 9: ROM -->
     <rom index="9" md5="none" zip="robokid.zip|robokidj2.zip">
         <part name="robokid.12a" crc="e64d1c10"/>
         <part name="robokid.14a" crc="8f9371e4"/>
@@ -97,7 +97,7 @@
         <part repeat="0x20000">00</part>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>0B</part></rom>
 
     <remark>Atomic Robo-kid (Japan, Type-2, set 2)</remark>

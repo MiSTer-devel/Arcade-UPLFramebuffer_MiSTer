@@ -1,25 +1,18 @@
-//============================================================================
-//
-//  ninjakd2_board.sv — ninjakd2.cpp hardware (Ninja-Kid II, Mutant Night, Ark Area, Atomic Robo-Kid,
-//  Omega Fighter): main board, video, sprite framebuffer, sound board and PCM. The CPUs and YM2203s
-//  are the shared pool in rtl/UPLFramebuffer.sv.
+//  Based on MAME ninjakd2.cpp (Roberto Ventura, Leandro Dardini, Yochizo, Nicola Salmoria, BSD-3-Clause)
 //  Copyright (C) 2026 Rodimus
-//
-//============================================================================
 
-module ninjakd2_board
+module ninjakd2_board #(parameter RAM_BLOCKS = 12)
 (
-    input                clk,            // 60 MHz fabric
-    input                cen_cpu,        // 6.0 MHz  main Z80
-    input                cen_pix,        // 6.0 MHz  pixel clock
-    input                cen_snd,        // 5.0 MHz  sound Z80
-    input                cen_ym,         // 1.5 MHz  both YM2203
+    input                clk,
+    input                cen_cpu,
+    input                cen_pix,
+    input                cen_snd,
+    input                cen_ym,
     input                reset,
     input                pause,
 
     input          [7:0] set_id,
 
-    // ---- controls, assembled into MAME port order by the wrapper (active low)
     input          [7:0] keycoin,
     input          [7:0] pad1,
     input          [7:0] pad2,
@@ -27,10 +20,9 @@ module ninjakd2_board
     input          [7:0] dsw2,
 
     input                crt_flip,
-    input  signed  [3:0] h_adj,          // CRT position, sync only
+    input  signed  [3:0] h_adj,
     input  signed  [3:0] v_adj,
 
-    // ---- ROM regions (rtl/ram_rom/upl_rom.sv)
     output        [15:0] maincpu_addr,  output  [3:0] maincpu_bank, input  [7:0] maincpu_data,
     output        [15:0] audiocpu_addr, output        audiocpu_m1,  input  [7:0] audiocpu_data,
     output        [14:0] char_addr,     output char_req,  input char_ack,  input [7:0] char_data,
@@ -40,31 +32,32 @@ module ninjakd2_board
     output        [17:0] spr_addr,      output spr_req,   input spr_ack,   input [7:0] spr_data,
     output        [15:0] pcm_addr,      output pcm_req,   input pcm_ack,   input [7:0] pcm_data,
 
-    // ---- video / audio
     output               HSync, VSync,
     output               HBlank, VBlank,
     output         [7:0] R, G, B,
     output signed [15:0] sound,
 
-    // ---- shared chips (rtl/UPLFramebuffer.sv)
-    output chip_pool_pkg::z80r_i_t         z80r_0_i,    // main Z80
+    output chip_pool_pkg::z80r_i_t         z80r_0_i,
     input  chip_pool_pkg::z80_o_t          z80r_0_o,
-    output chip_pool_pkg::z80r_i_t         z80r_1_i,    // sound Z80
+    output chip_pool_pkg::z80r_i_t         z80r_1_i,
     input  chip_pool_pkg::z80_o_t          z80r_1_o,
     output chip_pool_pkg::ym2203_i_t [1:0] ym2203_i,
     input  chip_pool_pkg::ym2203_o_t [1:0] ym2203_o,
-    output chip_pool_pkg::dpram_i_t        ram2k_0_i,   // fg VRAM
-    input  chip_pool_pkg::dpram_o_t        ram2k_0_o,
-    output chip_pool_pkg::dpram_i_t  [3:0] ram8k_i,     // bg VRAM x3, work RAM
-    input  chip_pool_pkg::dpram_o_t  [3:0] ram8k_o,
-    output chip_pool_pkg::dpram_i_t        ram_fb_i,    // sprite framebuffer
-    input  chip_pool_pkg::dpram_o_t        ram_fb_o
+    output ram_pool_pkg::pram_i_t [RAM_BLOCKS-1:0] pr_i,
+    input  ram_pool_pkg::pram_o_t [RAM_BLOCKS-1:0] pr_o
 );
+
+ram_pool_pkg::pram_i_t       fg_i,  snd_ram_i;
+ram_pool_pkg::pram_i_t [3:0] r8_i,  fb_i;
+ram_pool_pkg::pram_i_t [1:0] pal_i;
+assign pr_i[0]     = fg_i;
+assign pr_i[4:1]   = r8_i;
+assign pr_i[8:5]   = fb_i;
+assign pr_i[9]     = snd_ram_i;
+assign pr_i[11:10] = pal_i;
 
 wire [15:0] fb_raddr;       wire [7:0] fb_rdata;       wire spr_draw_window;
 wire  [7:0] pcm_cmd;        wire pcm_cmd_wr;
-
-//------------------------------------------------------- Main board ----------------------------------------------------------//
 
 wire [7:0] sound_latch;
 wire       sound_latch_wr;
@@ -113,20 +106,15 @@ UPLFramebuffer_MAIN main_board
     .vblank(VBlank),
 
     .z80_i(z80r_0_i), .z80_o(z80r_0_o),
-    .ram2k_0_i(ram2k_0_i), .ram2k_0_o(ram2k_0_o),
-    .ram8k_i(ram8k_i), .ram8k_o(ram8k_o)
+    .fg_i(fg_i), .fg_o(pr_o[0]),
+    .r8_i(r8_i), .r8_o(pr_o[4:1]),
+    .pal_i(pal_i), .pal_o(pr_o[11:10])
 );
 
-//------------------------------------------------------- Video ---------------------------------------------------------------//
-
-// mnight/mnightj/arkarea use an 11-bit bg tile index (ninjakd2.cpp:1047 family).
 wire bg_mnight  = (set_id >= 8'h06) && (set_id <= 8'h08);
 wire is_robokid = (set_id >= 8'h09) && (set_id <= 8'h0C);
 wire is_omegaf  = (set_id >= 8'h0D) && (set_id <= 8'h0F);
 
-// omegaf's machine_config is robokid() plus overrides, so it inherits gfx_robokid:
-// palette bases fg 0x300 / spr 0x200, col-aligned sub-tiles, 5-bit RGB. Only the
-// sprite stencil differs.
 wire gfx_robokid = is_robokid | is_omegaf;
 
 UPLFramebuffer_VIDEO video
@@ -161,8 +149,6 @@ UPLFramebuffer_VIDEO video
     .R(R), .G(G), .B(B)
 );
 
-//------------------------------------------------------- Sprites -------------------------------------------------------------//
-
 UPLFramebuffer_SPRITE sprites
 (
     .clk(clk),
@@ -180,10 +166,8 @@ UPLFramebuffer_SPRITE sprites
     .fb_raddr(fb_raddr), .fb_rdata(fb_rdata),
     .busy(),
 
-    .fb_i(ram_fb_i), .fb_o(ram_fb_o)
+    .fb_i(fb_i), .fb_o(pr_o[8:5])
 );
-
-//------------------------------------------------------- Sound board ---------------------------------------------------------//
 
 wire signed [15:0] snd_mono;
 
@@ -207,10 +191,10 @@ UPLFramebuffer_SND snd_board
     .sound_out(snd_mono),
 
     .z80_i(z80r_1_i), .z80_o(z80r_1_o),
-    .ym_i(ym2203_i), .ym_o(ym2203_o)
+    .ym_i(ym2203_i), .ym_o(ym2203_o),
+    .ram_i(snd_ram_i), .ram_o(pr_o[9])
 );
 
-// Mono board - one SPEAKER (ninjakd2.cpp:1575)
 wire signed [15:0] pcm_snd;
 
 UPLFramebuffer_PCM pcm_player
@@ -227,8 +211,6 @@ UPLFramebuffer_PCM pcm_player
     .sample_out(pcm_snd)
 );
 
-// Sum and saturate. The YM mix keeps its existing level (HW-approved), so the
-// PCM adds on top and only clips where the two peak together.
 wire signed [16:0] snd_mix = {snd_mono[15], snd_mono} + {pcm_snd[15], pcm_snd};
 wire signed [15:0] snd_sat = (snd_mix >  17'sd32767) ?  16'sd32767 :
                              (snd_mix < -17'sd32768) ? -16'sd32768 : snd_mix[15:0];

@@ -33,8 +33,7 @@
         <dip bits="15" name="Infinite Lives (Free Play)" ids="On,Off"/>
     </switches>
 
-    <!-- Index 0: CPU 1 / shared program 0000-7FFF, gfx1 at 0x8000, gfx2 at 0x10000, file by file
-         (MAME's ROM_LOAD16_BYTE interleave is decoded in the core) -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="ninjakun.zip">
         <part name="ninja-1.7a" crc="1c1dc141"/>
         <part name="ninja-2.7b" crc="39cc7d37"/>
@@ -50,12 +49,12 @@
         <part name="ninja-13.4d" crc="1760ed2c"/>
     </rom>
 
-    <!-- Index 1: CPU 2 program 0000-1FFF -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="ninjakun.zip">
         <part name="ninja-5.7h" crc="164a42c4"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>16</part></rom>
 
     <remark>Ninjakun Majou no Bouken (UPL, Taito license)</remark>

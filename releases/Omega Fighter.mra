@@ -31,50 +31,50 @@
         <dip bits="13,15" name="Coin A" ids="5 Coins/1 Credit,1 Coin/4 Credits,3 Coins/1 Credit,1 Coin/2 Credits,4 Coins/1 Credit,1 Coin/3 Credits,2 Coins/1 Credit,1 Coin/1 Credit"/>
     </switches>
 
-    <!-- Index 0: Main CPU. 0x8000 fixed, then banks 0-15 packed -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="omegaf.zip">
         <part name="1.5.3l" crc="57a7fd96" length="0x8000"/>
         <part name="1.5.3l" crc="57a7fd96"/>
         <part name="6.4l" crc="6277735c"/>
     </rom>
 
-    <!-- Index 1: Sound CPU -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="omegaf.zip">
         <part name="7.7m" crc="d40fc8d5"/>
     </rom>
 
-    <!-- Index 2: FG char ROM -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="omegaf.zip">
         <part name="4.18h" crc="9e2d8152"/>
     </rom>
 
-    <!-- Index 6: Sprite ROM -->
+    <!-- Index 6: ROM -->
     <rom index="6" md5="none" zip="omegaf.zip">
         <part name="8.23m" crc="0bd2a5d1"/>
     </rom>
 
-    <!-- Index 7: BG tile ROM 1 -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="omegaf.zip">
         <part name="2back1.27b" crc="21f8a32e"/>
     </rom>
 
-    <!-- Index 8: BG tile ROM 2 -->
+    <!-- Index 8: ROM -->
     <rom index="8" md5="none" zip="omegaf.zip">
         <part name="1back2.15b" crc="6210ddcc"/>
     </rom>
 
-    <!-- Index 9: BG tile ROM 3 -->
+    <!-- Index 9: ROM -->
     <rom index="9" md5="none" zip="omegaf.zip">
         <part name="3back3.5f" crc="c31cae56"/>
     </rom>
 
-    <!-- Index 11: PROMs -->
+    <!-- Index 11: ROM -->
     <rom index="11" md5="none" zip="omegaf.zip">
         <part name="10.20l" crc="89e0763f"/>
         <part name="11.27n" crc="59e44236"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>0D</part></rom>
 
     <remark>Omega Fighter (set 1)</remark>

@@ -34,7 +34,7 @@
         <dip bits="13,15" name="Coin A" ids="5 Coins/1 Credit,4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/4 Credits,1 Coin/3 Credits,1 Coin/2 Credits,1 Coin/1 Credit"/>
     </switches>
 
-    <!-- Index 0: Main CPU. 0x8000 fixed, then banks -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="1.3u" crc="5c475611"/>
         <part name="2.3s" crc="a1e23bd2"/>
@@ -43,40 +43,40 @@
         <part name="5.3m" crc="960725fb"/>
     </rom>
 
-    <!-- Index 1: Sound CPU -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="6.3h" crc="d3a18a79"/>
     </rom>
 
-    <!-- Index 12: MC8123 key. Opcode table then data table, 2K each -->
+    <!-- Index 12: ROM -->
     <rom index="12" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="ninjakd2.key" crc="ec25318f" offset="0x0000" length="0x800"/>
         <part name="ninjakd2.key" crc="ec25318f" offset="0x1000" length="0x800"/>
     </rom>
 
-    <!-- Index 2: FG char ROM -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="12.5n" crc="0936b365"/>
     </rom>
 
-    <!-- Index 6: Sprite ROM -->
+    <!-- Index 6: ROM -->
     <rom index="6" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="8.6l" crc="1b79c50a"/>
         <part name="7.6n" crc="0be5cd13"/>
     </rom>
 
-    <!-- Index 7: BG tile ROM 1 -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="11.2n" crc="41a714b3"/>
         <part name="10.2r" crc="c913c4ab"/>
     </rom>
 
-    <!-- Index 10: PCM samples -->
+    <!-- Index 10: ROM -->
     <rom index="10" md5="none" zip="ninjakd2.zip|rdaction.zip">
         <part name="9.6c" crc="c1d2d170"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>04</part></rom>
 
     <remark>Rad Action / NinjaKun Ashura no Shou</remark>

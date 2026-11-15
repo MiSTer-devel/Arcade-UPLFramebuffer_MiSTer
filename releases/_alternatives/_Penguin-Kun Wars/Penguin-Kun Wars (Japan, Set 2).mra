@@ -28,7 +28,7 @@
         <dip bits="7" name="Free Play" ids="On,Off"/>
     </switches>
 
-    <!-- Index 0: program 0000-7FFF, then gfx1 at 0x8000 file by file (MAME's lineswap is decoded in the core) -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="pkunwarja.zip|pkunwar.zip">
         <part name="peng_wars_1_red.7a" crc="9dfdf1b2"/>
         <part name="peng_wars_2_red.7b" crc="bc286b8c"/>
@@ -38,17 +38,17 @@
         <part name="4_yellow.7m" crc="061dfca8"/>
     </rom>
 
-    <!-- Index 1: program E000-FFFF -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="pkunwarja.zip|pkunwar.zip">
         <part name="3_red.5b" crc="56faebea"/>
     </rom>
 
-    <!-- Index 11: palette PROM -->
+    <!-- Index 11: ROM -->
     <rom index="11" md5="none" zip="pkunwarja.zip|pkunwar.zip">
         <part name="tbp18s030n.1f" crc="af0fc5e2"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>15</part></rom>
 
     <remark>Penguin-Kun Wars (UPL)</remark>

@@ -1,31 +1,19 @@
-//============================================================================
-//
-//  upl_rom.sv — ROM storage for the UPL framebuffer hardware.
-//
-//  CPU ROMs live in BRAM; graphics, PCM and PROMs live in SDRAM. Region base
-//  addresses and the MRA index map are fixed here and in releases/*.mra.
-//
-//============================================================================
-
+//  Based on MAME ninjakd2.cpp (Roberto Ventura, Leandro Dardini, Yochizo, Nicola Salmoria, BSD-3-Clause)
 module upl_rom
 (
-    input                clk,             // 60 MHz fabric; also clocks the SDRAM controller
-    input                por_reset,       // power-on ONLY. Must never include ioctl_download.
+    input                clk,
+    // power-on only: must never include ioctl_download
+    input                por_reset,
 
-    // SDRAM read latch. sdram.sv uses BURST_LENGTH=4, so which burst word the
-    // completion cycle holds depends on the board's data timing. rd_auto picks it
-    // by measurement; rd_mode is the manual override and the fallback.
     input                rd_auto,       // 1 = use the detected latch when detection succeeded
     input          [1:0] rd_mode,       // 0 = Early, 1 = Normal, 2 = Late
-    // pulse: SDRAM clock phase moved, re-run the latch probe
     input                recal,
-    input                ph_auto,       // OSD phase = Auto: sweep after each ROM load
+    input                ph_auto,
     input                ld_hold,       // status[0]: Main holds it across the whole MRA load
-    output reg     [6:0] ph_req_val,    // requested DPS position 0-79 (208 ps steps)
-    output reg           ph_req_tgl,    // flips once per request; recal is the ack
-    output               cal_hold,      // sweep pending or running: hold the game in reset
+    output         [6:0] ph_req_val,
+    output               ph_req_tgl,
+    output               cal_hold,
 
-    // ---- ROM download
     input                ioctl_download,
     input          [7:0] ioctl_index,
     input         [24:0] ioctl_addr,
@@ -35,23 +23,18 @@ module upl_rom
 
     output reg     [7:0] set_id,
 
-    // ---- main CPU ROM (BRAM): 0000-7FFF fixed, 8000-BFFF banked
     input         [15:0] maincpu_addr,
     input          [3:0] maincpu_bank,
     output         [7:0] maincpu_data,
 
-    // ---- nova2001.cpp boards: gfx from the bank image (their CPUs never read 8000-BFFF)
     input                gfx_sel,
     input         [17:0] gfx_addr,
     output         [7:0] gfx_data,
 
-    // ---- sound CPU ROM (BRAM). M1 fetches below 8000 come from the decrypted
-    //      opcode half on the sets that ship one (ninjakd2a/ninjakd2b).
     input         [15:0] audiocpu_addr,
     input                audiocpu_m1,
     output         [7:0] audiocpu_data,
 
-    // ---- SDRAM-backed read ports. Hold req until ack; data is valid with ack.
     input         [14:0] char_addr,   input char_req,   output char_ack,   output [7:0] char_data,
     input         [17:0] spr_addr,    input spr_req,    output spr_ack,    output [7:0] spr_data,
     input         [18:0] tile1_addr,  input tile1_req,  output tile1_ack,  output [7:0] tile1_data,
@@ -59,7 +42,6 @@ module upl_rom
     input         [18:0] tile3_addr,  input tile3_req,  output tile3_ack,  output [7:0] tile3_data,
     input         [15:0] pcm_addr,    input pcm_req,    output pcm_ack,    output [7:0] pcm_data,
 
-    // ---- SDRAM pins
     inout  [15:0] SDRAM_DQ,
     output [12:0] SDRAM_A,
     output        SDRAM_DQML,
@@ -73,22 +55,19 @@ module upl_rom
     output        SDRAM_CLK
 );
 
-    // MRA index map (must match releases/*.mra)
-    //   0 maincpu   1 soundcpu   2 chars   5 set-id
-    //   6 sprites   7 tiles1     8 tiles2  9 tiles3   10 pcm   11 proms
+    // MRA index map, must match releases/*.mra
     localparam [7:0] IDX_MAIN = 8'd0,  IDX_SND  = 8'd1,  IDX_CHAR = 8'd2,
                      IDX_SET  = 8'd5,  IDX_SPR  = 8'd6,  IDX_TIL1 = 8'd7,
                      IDX_TIL2 = 8'd8,  IDX_TIL3 = 8'd9,  IDX_PCM  = 8'd10,
                      IDX_PROM = 8'd11, IDX_KEY  = 8'd12;
 
-    // SDRAM region bases (byte addresses)
-    localparam [23:0] SDR_CHAR = 24'h000000,   // 32K
-                      SDR_SPR  = 24'h040000,   // 256K
-                      SDR_TIL1 = 24'h080000,   // 512K
-                      SDR_TIL2 = 24'h100000,   // 512K
-                      SDR_TIL3 = 24'h180000,   // 512K
-                      SDR_PCM  = 24'h200000,   // 64K
-                      SDR_PROM = 24'h210000;   // 2K
+    localparam [23:0] SDR_CHAR = 24'h000000,
+                      SDR_SPR  = 24'h040000,
+                      SDR_TIL1 = 24'h080000,
+                      SDR_TIL2 = 24'h100000,
+                      SDR_TIL3 = 24'h180000,
+                      SDR_PCM  = 24'h200000,
+                      SDR_PROM = 24'h210000;
 
     wire in_sdram = (ioctl_index == IDX_CHAR) || (ioctl_index == IDX_SPR)  ||
                     (ioctl_index == IDX_TIL1) || (ioctl_index == IDX_TIL2) ||
@@ -109,20 +88,14 @@ module upl_rom
         endcase
     end
 
-    // Game select byte (MRA index 5)
     always_ff @(posedge clk)
         if (ioctl_wr && ioctl_index == IDX_SET) set_id <= ioctl_data;
 
-    // ninjakd2a / ninjakd2b ship a pre-decrypted opcode half; every other set
-    // runs opcodes and data from the same image.
     wire use_opcodes = (set_id == 8'h01) || (set_id == 8'h02);
 
-    // MC8123 sets never use the pre-decrypted opcode ROM (01/02 bootlegs only), so
-    // rom_snd_opcodes holds the key instead and costs no extra block RAM.
     wire mc8123 = (set_id == 8'h00) || (set_id == 8'h03)
                || (set_id == 8'h04) || (set_id == 8'h05);
 
-    // Main CPU ROM (BRAM). 0x0000-0x7FFF fixed, bank image from download offset 0x8000.
     wire [18:0] mc_off      = ioctl_addr[18:0];
     wire        mc_is_fixed = (mc_off < 19'h08000);
     wire [18:0] mc_bank_off = mc_off - 19'h08000;
@@ -149,16 +122,13 @@ module upl_rom
     assign maincpu_data = maincpu_addr[15] ? mc_bank_q : mc_fixed_q;
     assign gfx_data     = mc_bank_q;
 
-    // Sound CPU ROM (BRAM). 0x00000-0x0FFFF data, 0x10000-0x17FFF opcodes.
     wire [16:0] sc_off   = ioctl_addr[16:0];
     wire        sc_is_op = sc_off[16];
     wire        sc_wr    = ioctl_wr && (ioctl_index == IDX_SND);
 
     wire [7:0] sc_op_q, sc_lo_q, sc_hi_q;
 
-    // SND decodes cs_rom = (A[15:14] != 2'b11), so only 0000-BFFF is reachable.
-    // Split 32K+16K to free 16 M10K blocks; the MRA's C000-FFFF bytes land nowhere.
-    dpram_dc #(.widthad_a(15), .width_a(8)) rom_snd_lo          // 0000-7FFF
+    dpram_dc #(.widthad_a(15), .width_a(8)) rom_snd_lo
     (
         .clock_a(clk), .address_a(audiocpu_addr[14:0]),
         .data_a(8'd0), .wren_a(1'b0), .q_a(sc_lo_q),
@@ -166,7 +136,7 @@ module upl_rom
         .data_b(ioctl_data), .wren_b(sc_wr && !sc_is_op && !sc_off[15]), .q_b()
     );
 
-    dpram_dc #(.widthad_a(14), .width_a(8)) rom_snd_hi          // 8000-BFFF
+    dpram_dc #(.widthad_a(14), .width_a(8)) rom_snd_hi
     (
         .clock_a(clk), .address_a(audiocpu_addr[13:0]),
         .data_a(8'd0), .wren_a(1'b0), .q_a(sc_hi_q),
@@ -176,9 +146,6 @@ module upl_rom
 
     wire [7:0] sc_data_q = audiocpu_addr[15] ? sc_hi_q : sc_lo_q;
 
-    // MC8123 key index: bitswap<12>(addr,15,14,13,12,11,10,8,6,4,2,1,0). Bit 11 is
-    // addr[15], always 0 over the encrypted 0000-7FFF, so the MRA packs the two live
-    // 2K halves back to back: opcode table then data table, 4K total.
     wire [10:0] tbl_num = {audiocpu_addr[14], audiocpu_addr[13], audiocpu_addr[12],
                            audiocpu_addr[11], audiocpu_addr[10], audiocpu_addr[8],
                            audiocpu_addr[6],  audiocpu_addr[4],  audiocpu_addr[2],
@@ -191,16 +158,13 @@ module upl_rom
     (
         .clock_a(clk), .address_a(sc_op_addr),
         .data_a(8'd0), .wren_a(1'b0), .q_a(sc_op_q),
-        // Opcodes occupy 0x10000-0x17FFF of a 0x20000 region the MRA fills, so bit 15
-        // must gate the write or 0x18000+ aliases onto 0x0000. MC8123 sets: key RAM.
         .clock_b(clk),
         .address_b(key_wr ? {3'd0, ioctl_addr[11:0]} : sc_off[14:0]),
         .data_b(ioctl_data),
+        // bit 15 must gate the write, or 0x18000+ aliases onto 0x0000
         .wren_b(key_wr || (sc_wr && sc_is_op && !sc_off[15])), .q_b()
     );
 
-    // In-flight decrypt. m1 is stable for the whole Z80 cycle, so it both addresses
-    // the key and selects the table.
     wire [7:0] sc_dec;
 
     UPLFramebuffer_MC8123 mc8123_dec
@@ -211,24 +175,19 @@ module upl_rom
         .dec   (sc_dec)
     );
 
-    // 0x8000-0xBFFF is not encrypted (MAME decodes only the first 0x8000).
     assign audiocpu_data = mc8123 ? (audiocpu_addr[15] ? sc_data_q : sc_dec)
                          : (use_opcodes && audiocpu_m1 && !audiocpu_addr[15])
                            ? sc_op_q : sc_data_q;
 
-    // SDRAM. Read clients round-robin; writes always win so downloads never stall.
     wire [5:0] req = {pcm_req, tile3_req, tile2_req, tile1_req, spr_req, char_req};
 
-    reg  [2:0] rr    = 3'd0;   // rotating priority pointer
-    reg  [2:0] cur   = 3'd0;   // client currently being served
+    reg  [2:0] rr    = 3'd0;
+    reg  [2:0] cur   = 3'd0;
     reg  [5:0] ack_r = 6'd0;
     reg  [7:0] rd_q  = 8'd0;
 
-    // A client acked last cycle cannot drop req until the cycle after, so mask it
-    // out here rather than burn an arbiter slot the guards below would veto.
     wire [5:0] req_eff = req & ~ack_r;
 
-    // Rotating scan from rr. No modulo: a non-power-of-2 '%' synthesizes a divider.
     reg [2:0] pick;
     reg       pick_v;
     reg [2:0] scan;
@@ -245,21 +204,12 @@ module upl_rom
             scan = (scan == 3'd5) ? 3'd0 : (scan + 3'd1);
         end
 
-        // char (client 0) jumps the queue: it is the only client with no lookahead,
-        // and its fg FSM hands rowbits to the display whether the fetch completed or
-        // not. Demand is bounded at 4 accesses per group, so it cannot starve the rest.
         if (req_eff[3'd0]) begin
             pick   = 3'd0;
             pick_v = 1'b1;
         end
     end
 
-    // gfx_unscramble, in flight (ninjakd2.cpp:2249 lineswap_gfx_roms). MAME rotates
-    // the low (bit+1) address bits left at load:
-    //   da[bit:1] = sa[bit-1:0], da[0] = sa[bit]; bits above `bit` unchanged.
-    // SDRAM holds the raw ROM and the inverse rotate is applied here. chars rotate
-    // about bit 13, sprites and tiles1 about bit 14. set_id 00-08 only; robokid and
-    // omegaf use empty_init and are not scrambled.
     wire gfx_scr = (set_id <= 8'h08);
 
     wire [14:0] char_sa  = gfx_scr ? {char_addr[14],     char_addr[0],  char_addr[13:1]}   : char_addr;
@@ -278,12 +228,6 @@ module upl_rom
         endcase
     end
 
-    // 16-bit read cache: every SDRAM word holds two bytes this hardware will ask
-    // for, so every second byte fetch becomes a free hit. Pairing differs by set —
-    // unscrambled clients pair (da, da+1), scrambled ones (da, da+2) since
-    // sa[0] = da[1] — so TWO slots per client are needed to cover the 4-byte row
-    // fetches without thrashing. Contents are ROM; only a download invalidates.
-    // CACHE_EN = 0 falls back to one SDRAM read per byte.
     localparam CACHE_EN = 1'b1;
 
     reg [22:0] c_tag [0:5][0:1];
@@ -305,14 +249,10 @@ module upl_rom
     reg         sd_old_ready;
     reg   [8:0] sd_refresh_cnt;
 
-    // Latch every download byte on arrival whatever sd_busy is doing; a strobe
-    // landing on a busy cycle is otherwise lost.
     reg         wr_pend;
     reg  [23:0] wr_addr;
     reg   [7:0] wr_data;
 
-    // Deferred read capture for RD_LATE; cur/sd_lsb are snapshotted because the
-    // arbiter may start another read next cycle.
     reg         rd_pend = 1'b0;
     reg   [1:0] rd_cnt  = 2'd0;
     reg   [2:0] rd_cur  = 3'd0;
@@ -324,17 +264,9 @@ module upl_rom
     localparam [1:0] RD_EARLY = 2'd0, RD_NORMAL = 2'd1,
                      RD_LATE  = 2'd2, RD_LATER  = 2'd3;
 
-    // sd_dout is a register of SDRAM_DQ, so a one-deep delay gives burst word 0.
     reg [15:0] sd_dout_d1;
     always_ff @(posedge clk) sd_dout_d1 <= sd_dout;
 
-    // ---- read-latch auto-detect --------------------------------------------
-    // Downloads are single byte writes, so SDRAM contents are correct whatever the
-    // latch does. Reads burst 4 words and wrap inside the aligned 4-word block, so a
-    // board presenting data one cycle early returns word (p+1)%4 for a read of word p.
-    // One reference block whose four words are pairwise distinct therefore separates
-    // the three candidate sample points: for every phase exactly one returns the word
-    // that was written. Falls back to rd_mode if no such block is seen or a read hangs.
     wire [23:0] dl_a = dl_base + ioctl_addr[23:0];
     wire        dl_byte = ioctl_wr && in_sdram;
 
@@ -347,7 +279,6 @@ module upl_rom
         blk_rdy <= dl_byte && (dl_a[2:0] == 3'd7);
     end
 
-    // dl_blk holds b0..b7 oldest-first once the 8th byte has shifted in.
     wire [15:0] blk_w0 = {dl_blk[55:48], dl_blk[63:56]};
     wire [15:0] blk_w1 = {dl_blk[39:32], dl_blk[47:40]};
     wire [15:0] blk_w2 = {dl_blk[23:16], dl_blk[31:24]};
@@ -368,140 +299,63 @@ module upl_rom
         end
     end
 
-    // ---- SDRAM clock phase calibration ----
-    // The char ROM (index 2, SDRAM 0x000000, 32K in every set) is checksummed as it
-    // downloads. Once the load has gone quiet, all 80 DPS positions are tried: the
-    // region is read back at each, checksummed at all four latch points, and the
-    // position passes for a latch when that checksum matches. The centre of the
-    // widest passing run (circular, per latch) is requested. Nothing passes -> 0,
-    // the pre-calibration clock. The latch probe re-runs on the final move.
-    // CRC-32: a wrong latch returns each 4-word burst rotated, which additive sums can miss.
-    function automatic [31:0] crc_step(input [31:0] c, input [15:0] d);   // CRC-32 0x04C11DB7
-        integer i;
-        reg [31:0] r;
-        begin
-            r = c;
-            for (i = 15; i >= 0; i = i - 1)
-                r = {r[30:0], 1'b0} ^ ((r[31] ^ d[i]) ? 32'h04C11DB7 : 32'd0);
-            crc_step = r;
-        end
-    endfunction
-    reg  [31:0] ref_crc;
-    reg  [14:0] ref_cnt;
-    wire [15:0] ref_w16 = {ioctl_data, dl_blk[7:0]};   // odd byte arriving, even byte before it
-    wire        ref_wd  = dl_byte && (ioctl_index == IDX_CHAR) && ioctl_addr[0] && !ref_cnt[14];
-    wire        ref_ok  = (ref_cnt[14:10] != 5'd0);    // at least 1K words
-    always_ff @(posedge clk) begin
-        if (dl_byte && (ioctl_index == IDX_CHAR) && (ioctl_addr[23:0] == 24'd0)) begin
-            ref_crc <= 32'hFFFFFFFF; ref_cnt <= 15'd0;
-        end else if (ref_wd) begin
-            ref_crc <= crc_step(ref_crc, ref_w16); ref_cnt <= ref_cnt + 15'd1;
-        end
-    end
-
-    localparam [2:0] CS_IDLE = 3'd0, CS_REQ = 3'd1, CS_TGL = 3'd2, CS_WACK = 3'd3,
-                     CS_SETTLE = 3'd4, CS_READ = 3'd5, CS_EVAL = 3'd6, CS_PICK = 3'd7;
-    reg   [2:0] cal_st;
-    reg         cal_busy, cal_pend, cal_fin, cal_abrt, cal_inflight, sd_cal, ph_auto_d;
-    reg   [6:0] cal_p, cal_home, cal_tgt;
-    reg  [14:0] cal_w;
-    reg   [7:0] cal_set;
-    reg  [21:0] cal_to;
-    reg  [20:0] cal_quiet;
-    reg   [1:0] cal_dly;
-    reg  [15:0] cal_e, cal_n, cal_l;
-    reg  [31:0] cs_crc [0:3];
-    // Run trackers per latch (0 Early, 1 Normal, 2 Late, 3 Later).
-    reg   [6:0] t_cur [0:3], t_curs [0:3], t_first [0:3], t_best [0:3], t_bests [0:3];
-    reg   [3:0] t_open;
-
-    assign cal_hold = cal_busy || (cal_pend && ph_auto && ref_ok);
-
-    wire [15:0] cal_cw [0:3];
-    assign cal_cw[0] = cal_e;     // completion -1
-    assign cal_cw[1] = cal_n;     // completion
-    assign cal_cw[2] = cal_l;     // completion +1
-    assign cal_cw[3] = sd_dout;   // completion +2 (valid when cal_dly == 1)
-
-    wire [3:0] cal_pass = {cs_crc[3] == ref_crc, cs_crc[2] == ref_crc,
-                           cs_crc[1] == ref_crc, cs_crc[0] == ref_crc};
-
-    // Widest run per latch, including one that wraps 79 -> 0.
-    reg  [6:0] pk_len [0:3];
-    reg  [6:0] pk_st  [0:3];
-    reg  [6:0] pk_blen, pk_bst;
-    reg  [7:0] pk_mid;
-    integer    li;
-    always_comb begin
-        for (li = 0; li < 4; li = li + 1) begin
-            if ((t_cur[li] != 7'd0) && (t_first[li] != 7'd0) && (t_first[li] != 7'd80) &&
-                ((t_cur[li] + t_first[li]) > t_best[li])) begin
-                pk_len[li] = t_cur[li] + t_first[li];
-                pk_st[li]  = t_curs[li];
-            end else begin
-                pk_len[li] = t_best[li];
-                pk_st[li]  = t_bests[li];
-            end
-        end
-        // Preference on ties: Normal, Early, Late, Later.
-        pk_blen = pk_len[1]; pk_bst = pk_st[1];
-        if (pk_len[0] > pk_blen) begin pk_blen = pk_len[0]; pk_bst = pk_st[0]; end
-        if (pk_len[2] > pk_blen) begin pk_blen = pk_len[2]; pk_bst = pk_st[2]; end
-        if (pk_len[3] > pk_blen) begin pk_blen = pk_len[3]; pk_bst = pk_st[3]; end
-        pk_mid = {1'b0, pk_bst} + {2'b00, pk_blen[6:1]};
-        if (pk_mid >= 8'd80) pk_mid = pk_mid - 8'd80;
-    end
-
     reg         probing, sd_probe, det_ok, dl_d, prb_req;
     reg   [1:0] prb_dly;
     reg   [1:0] prb_ph, rd_det;
-    reg   [3:0] prb_ok;                 // {Later, Late, Normal, Early} still matching
+    reg   [3:0] prb_ok;
     reg  [15:0] prb_wd, prb_e, prb_n, prb_l;
     reg  [15:0] prb_to;
 
-    wire [3:0] prb_ok_nxt = {prb_ok[3] && (sd_dout == prb_wd),   // completion +2
-                             prb_ok[2] && (prb_l   == prb_wd),   // completion +1
-                             prb_ok[1] && (prb_n   == prb_wd),   // completion
-                             prb_ok[0] && (prb_e   == prb_wd)};  // completion -1
+    wire        cal_busy, cal_rd_go;
+    wire [14:0] cal_rd_word;
+    reg         sd_cal;
+    wire        cal_take = !sd_busy && !wr_pend && cal_rd_go && !rd_pend;
+    wire        cal_cpl  = sd_busy && sd_ready && !sd_rd && !sd_wr && sd_was_rd && sd_cal && !sd_probe;
+
+    sdram_phase_cal #(.POS(7'd80), .LATCH_MASK(4'hF), .QUIET_BITS(21)) phase_cal
+    (
+        .clk(clk), .por_reset(por_reset),
+        .ref_clr(dl_byte && (ioctl_index == IDX_CHAR) && (ioctl_addr[23:0] == 24'd0)),
+        .ref_wd(dl_byte && (ioctl_index == IDX_CHAR) && ioctl_addr[0]),
+        .ref_w({ioctl_data, dl_blk[7:0]}),
+        .ph_auto(ph_auto), .ld_busy(ioctl_download | ld_hold), .dl_active(ioctl_download),
+        .blocked(probing),
+        .ph_req_val(ph_req_val), .ph_req_tgl(ph_req_tgl), .ph_ack(recal),
+        .rd_go(cal_rd_go), .rd_word(cal_rd_word), .rd_take(cal_take), .rd_cpl(cal_cpl),
+        .sd_dout(sd_dout), .sd_dout_d1(sd_dout_d1),
+        .busy(cal_busy), .hold(cal_hold)
+    );
+
+    wire [3:0] prb_ok_nxt = {prb_ok[3] && (sd_dout == prb_wd),
+                             prb_ok[2] && (prb_l   == prb_wd),
+                             prb_ok[1] && (prb_n   == prb_wd),
+                             prb_ok[0] && (prb_e   == prb_wd)};
 
     wire [1:0] rd_sel = (rd_auto && det_ok) ? rd_det : rd_mode;
 
     wire [15:0] sd_dout_sel = (rd_sel == RD_EARLY) ? sd_dout_d1 : sd_dout;
 
-    // cal_busy holds the HPS while an aborted sweep restores the phase
     assign ioctl_wait = sd_busy || (ioctl_wr && in_sdram) || cal_busy;
 
-    // A hit needs no SDRAM cycle, so it can be served while another client's read is
-    // in flight. rd_q/ack_r are shared: one ack per cycle, and a completion wins.
     wire sd_complete = sd_busy && sd_ready && !sd_rd && !sd_wr;
     wire comp_ack    = (sd_complete && sd_was_rd && (rd_sel < RD_LATE)) || rd_pend;
     wire serve_hit   = c_hit && !comp_ack && !ack_r[pick] && !ioctl_download && !probing && !cal_busy;
 
     always_ff @(posedge clk) begin
-        // por_reset ONLY: a reset including ioctl_download would idle this FSM for
-        // the whole transfer and no byte would land.
         if (por_reset) begin
             sd_rd <= 0; sd_wr <= 0; sd_refresh <= 0; sd_busy <= 0; sd_was_rd <= 0;
             sd_refresh_cnt <= 9'd0; sd_old_ready <= 1'b1; wr_pend <= 1'b0; ack_r <= 6'd0;
             rd_pend <= 1'b0;
             probing <= 1'b0; sd_probe <= 1'b0; prb_dly <= 2'd0; det_ok <= 1'b0;
             rd_cnt <= 2'd0; dl_d <= 1'b0; prb_req <= 1'b0;
-            cal_st <= CS_IDLE; cal_busy <= 1'b0; cal_pend <= 1'b0; cal_fin <= 1'b0;
-            cal_abrt <= 1'b0; cal_inflight <= 1'b0; sd_cal <= 1'b0; cal_dly <= 2'd0;
-            cal_home <= 7'd0; cal_quiet <= 21'd0; ph_auto_d <= 1'b0; cal_to <= 22'd0;
-            ph_req_val <= 7'd0; ph_req_tgl <= 1'b0;
+            sd_cal <= 1'b0;
             rr <= 3'd0;
             for (ci = 0; ci < 6; ci = ci + 1) begin
                 c_vld[ci] <= 2'd0;
                 c_lru[ci] <= 1'b0;
             end
         end else begin
-            // Probe once the download's last write has drained. Re-running on every
-            // download pulse just re-confirms the same answer.
             dl_d <= ioctl_download;
-            // Request is held until it can start: firing only on the download's falling
-            // edge silently skipped the probe whenever the bus was busy on that cycle.
-            // The probe read itself still waits for !sd_busy in the issue branch below.
             if ((dl_d && !ioctl_download) || recal) prb_req <= 1'b1;
             else if (prb_req && ref_vld && !probing && !ioctl_download && !cal_busy) begin
                 prb_req <= 1'b0;
@@ -509,95 +363,11 @@ module upl_rom
             end
             if (probing) begin
                 prb_to <= prb_to + 16'd1;
-                if (&prb_to) begin      // never leave the clients blocked
+                if (&prb_to) begin
                     probing <= 1'b0; sd_probe <= 1'b0; prb_dly <= 2'd0; det_ok <= 1'b0;
                 end
             end
 
-            // ---- phase calibration ----
-            ph_auto_d <= ph_auto;
-            cal_quiet <= (ioctl_download || ld_hold) ? 21'd0 : (cal_quiet + {20'd0, ~&cal_quiet});
-            if (ref_wd || (ph_auto && !ph_auto_d)) cal_pend <= 1'b1;
-            if (cal_busy) cal_to <= cal_to + 22'd1;
-
-            if (cal_busy && (!ph_auto || &cal_to)) begin
-                // Manual phase selected, or an ack never came: stop, release the game.
-                cal_busy <= 1'b0; cal_st <= CS_IDLE;
-            end else if (cal_busy && ioctl_download && !cal_abrt) begin
-                // New load mid-sweep: return to the last good position before any write
-                // (ioctl_wait holds the HPS), then sweep again once it is quiet.
-                cal_abrt <= 1'b1; cal_fin <= 1'b1; cal_tgt <= cal_home; cal_st <= CS_REQ;
-            end else begin
-                case (cal_st)
-                    CS_IDLE:
-                        if (cal_pend && ph_auto && ref_ok && (&cal_quiet) && !probing && !ioctl_download && !ld_hold) begin
-                            cal_pend <= 1'b0; cal_busy <= 1'b1; cal_fin <= 1'b0; cal_abrt <= 1'b0;
-                            cal_p <= 7'd0; cal_tgt <= 7'd0; t_open <= 4'hF; cal_to <= 22'd0;
-                            for (li = 0; li < 4; li = li + 1) begin
-                                t_cur[li] <= 7'd0; t_curs[li] <= 7'd0; t_first[li] <= 7'd0;
-                                t_best[li] <= 7'd0; t_bests[li] <= 7'd0;
-                            end
-                            cal_st <= CS_REQ;
-                        end
-                    CS_REQ: begin
-                        ph_req_val <= cal_tgt; cal_to <= 22'd0;
-                        cal_st <= CS_TGL;
-                    end
-                    CS_TGL: begin   // value settled a cycle before the toggle crosses
-                        ph_req_tgl <= ~ph_req_tgl;
-                        cal_st <= CS_WACK;
-                    end
-                    CS_WACK:
-                        if (recal) begin
-                            if (cal_fin) begin
-                                cal_busy <= 1'b0; cal_st <= CS_IDLE;
-                                if (cal_abrt) cal_pend <= 1'b1;
-                                else          cal_home <= cal_tgt;
-                            end else begin
-                                cal_set <= 8'd0; cal_st <= CS_SETTLE;
-                            end
-                        end
-                    CS_SETTLE: begin
-                        cal_set <= cal_set + 8'd1;
-                        if (&cal_set) begin
-                            cal_w <= 15'd0;
-                            for (li = 0; li < 4; li = li + 1) cs_crc[li] <= 32'hFFFFFFFF;
-                            cal_st <= CS_READ;
-                        end
-                    end
-                    CS_READ:
-                        if ((cal_w == ref_cnt) && !cal_inflight) cal_st <= CS_EVAL;
-                    CS_EVAL: begin
-                        for (li = 0; li < 4; li = li + 1) begin
-                            if (cal_pass[li]) begin
-                                t_cur[li] <= t_cur[li] + 7'd1;
-                                if (t_cur[li] == 7'd0) t_curs[li] <= cal_p;
-                                if (t_open[li]) t_first[li] <= t_first[li] + 7'd1;
-                                if ((t_cur[li] + 7'd1) > t_best[li]) begin
-                                    t_best[li]  <= t_cur[li] + 7'd1;
-                                    t_bests[li] <= (t_cur[li] == 7'd0) ? cal_p : t_curs[li];
-                                end
-                            end else begin
-                                t_cur[li] <= 7'd0; t_open[li] <= 1'b0;
-                            end
-                        end
-                        if (cal_p == 7'd79) cal_st <= CS_PICK;
-                        else begin cal_p <= cal_p + 7'd1; cal_tgt <= cal_p + 7'd1; cal_st <= CS_REQ; end
-                    end
-                    CS_PICK: begin
-                        // Nothing passed, or everything did: keep the pre-calibration clock.
-                        cal_tgt <= ((pk_blen == 7'd0) || (pk_blen == 7'd80)) ? 7'd0 : pk_mid[6:0];
-                        cal_fin <= 1'b1;
-                        cal_st  <= CS_REQ;
-                    end
-                endcase
-            end
-
-            // AUTO_REFRESH: 8192 rows / 64 ms = 7.8125 us = 468 cycles at 60 MHz.
-            // Toggled unconditionally and OUTSIDE the arbiter so a busy client cannot
-            // starve it; the controller edge-detects it and services it from IDLE.
-            // This toggle is the only refresh source — sdram.sv's cycles_per_refresh
-            // is declared but never referenced.
             if (sd_refresh_cnt == 9'd467) begin
                 sd_refresh_cnt <= 9'd0;
                 sd_refresh     <= ~sd_refresh;
@@ -613,23 +383,19 @@ module upl_rom
                 wr_data <= ioctl_data;
             end
 
-            // accepted: ready fell 1->0, drop the strobe so the op runs once
             if (sd_old_ready && !sd_ready) begin
                 sd_rd <= 0;
                 sd_wr <= 0;
             end
 
             if (sd_busy) begin
-                // complete: ready back high with the strobe already cleared
                 if (sd_ready && !sd_rd && !sd_wr) begin
                     if (sd_was_rd) begin
                         if (sd_probe) begin
                             prb_e <= sd_dout_d1; prb_n <= sd_dout;
                             prb_dly <= 2'd2; sd_probe <= 1'b0;
-                        // calibration read capture
                         end else if (sd_cal) begin
-                            cal_e <= sd_dout_d1; cal_n <= sd_dout;
-                            cal_dly <= 2'd2; sd_cal <= 1'b0;
+                            sd_cal <= 1'b0;
                         end else if (rd_sel >= RD_LATE) begin
                             rd_pend <= 1'b1; rd_cur <= cur; rd_lsbp <= sd_lsb;
                             rd_cnt  <= (rd_sel == RD_LATER) ? 2'd2 : 2'd1;
@@ -650,14 +416,11 @@ module upl_rom
                     sd_din   <= {wr_data, wr_data};
                     sd_bs    <= wr_addr[0] ? 2'b10 : 2'b01;
                     sd_wr    <= 1; sd_busy <= 1; sd_was_rd <= 0;
-                    // Keep a request arriving this cycle: a bare `wr_pend <= 0` here
-                    // would win as the last assignment and drop that byte.
+                    // a bare wr_pend <= 0 here would win as the last assignment and drop that byte
                     wr_pend  <= (ioctl_wr && in_sdram);
-                // !ack_r[pick] && !c_hit: never fetch for a client whose ack is already
-                // up or is being served from cache, or its next read is one fetch stale.
-                end else if ((cal_st == CS_READ) && cal_busy && !cal_inflight && (cal_w != ref_cnt) && !rd_pend) begin
-                    sd_addr   <= {11'd0, cal_w};   // SDR_CHAR is word 0
-                    sd_rd     <= 1; sd_busy <= 1; sd_was_rd <= 1; sd_cal <= 1; cal_inflight <= 1;
+                end else if (cal_rd_go && !rd_pend) begin
+                    sd_addr   <= {11'd0, cal_rd_word};
+                    sd_rd     <= 1; sd_busy <= 1; sd_was_rd <= 1; sd_cal <= 1;
                 end else if (probing && (prb_dly == 2'd0)) begin
                     sd_addr   <= {3'd0, ref_wa + {21'd0, prb_ph}};
                     prb_wd    <= ref_w[prb_ph];
@@ -671,7 +434,6 @@ module upl_rom
                 end
             end
 
-            // RD_LATE capture, one cycle after completion
             if (rd_pend && (rd_cnt > 2'd1)) rd_cnt <= rd_cnt - 2'd1;
             else if (rd_pend) begin
                 rd_q          <= rd_lsbp ? sd_dout[15:8] : sd_dout[7:0];
@@ -683,13 +445,11 @@ module upl_rom
                 c_lru[rd_cur]                <= ~c_lru[rd_cur];
             end
 
-            // Late sample lands here, one cycle after completion, so all three
-            // candidate sample points are now in hand for this phase.
             if (prb_dly == 2'd2) begin
-                prb_l   <= sd_dout;          // completion +1
+                prb_l   <= sd_dout;
                 prb_dly <= 2'd1;
             end else if (prb_dly == 2'd1) begin
-                prb_ok  <= prb_ok_nxt;       // sd_dout is now completion +2
+                prb_ok  <= prb_ok_nxt;
                 prb_dly <= 2'd0;
                 if (prb_ph == 2'd3) begin
                     probing <= 1'b0;
@@ -701,25 +461,13 @@ module upl_rom
                 end else prb_ph <= prb_ph + 2'd1;
             end
 
-            // calibration sample pipeline
-            if (cal_dly == 2'd2) begin
-                cal_l   <= sd_dout;          // completion +1
-                cal_dly <= 2'd1;
-            end else if (cal_dly == 2'd1) begin
-                for (li = 0; li < 4; li = li + 1) cs_crc[li] <= crc_step(cs_crc[li], cal_cw[li]);
-                cal_dly <= 2'd0; cal_inflight <= 1'b0; cal_w <= cal_w + 15'd1;
-            end
-
-            // Cache hit: ack immediately and rotate the pointer as a real service
-            // would, so one client cannot monopolise the port.
             if (serve_hit) begin
                 rd_q        <= cli_byte[0] ? c_word[15:8] : c_word[7:0];
                 ack_r[pick] <= 1'b1;
                 rr          <= (pick == 3'd5) ? 3'd0 : (pick + 3'd1);
             end
 
-            // ROM never changes underneath us, so a download is the only invalidation.
-            if (ioctl_download || recal)   // recal: words cached at the old phase may be bad
+            if (ioctl_download || recal)
                 for (ci = 0; ci < 6; ci = ci + 1) c_vld[ci] <= 2'd0;
         end
     end
@@ -732,8 +480,6 @@ module upl_rom
     assign tile3_data = rd_q;
     assign pcm_data   = rd_q;
 
-    // Clock-rate dependent: 468 cycles = 7.8125 us at 60 MHz (stock 780 would be
-    // 13 us and lose data). Startup 100 us = 6060 cycles.
     sdram #(.sdram_startup_cycles(14'd6060), .cycles_per_refresh(14'd468)) sdram_i
     (
         .init       (por_reset),

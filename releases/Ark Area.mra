@@ -37,7 +37,7 @@
         <dip bits="15" name="Unused" ids="On,Off"/>
     </switches>
 
-    <!-- Index 0: Main CPU. 0x8000 fixed, then banks -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="arkarea.zip">
         <part name="arkarea.008" crc="1ce1b5b9"/>
         <part name="arkarea.009" crc="db1c81d1"/>
@@ -46,32 +46,32 @@
         <part name="arkarea.012" crc="3c4c65d5"/>
     </rom>
 
-    <!-- Index 1: Sound CPU -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="arkarea.zip">
         <part name="arkarea.013" crc="2d409d58"/>
         <part repeat="0x8000">00</part>
     </rom>
 
-    <!-- Index 2: FG char ROM -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="arkarea.zip">
         <part name="arkarea.004" crc="69e36af2"/>
     </rom>
 
-    <!-- Index 6: Sprite ROM -->
+    <!-- Index 6: ROM -->
     <rom index="6" md5="none" zip="arkarea.zip">
         <part name="arkarea.007" crc="d5684a27"/>
         <part name="arkarea.006" crc="2c0567d6"/>
         <part name="arkarea.005" crc="9886004d"/>
     </rom>
 
-    <!-- Index 7: BG tile ROM 1 -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="arkarea.zip">
         <part name="arkarea.003" crc="6f45a308"/>
         <part name="arkarea.002" crc="051d3482"/>
         <part name="arkarea.001" crc="09d11ab7"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>08</part></rom>
 
     <remark>Ark Area</remark>

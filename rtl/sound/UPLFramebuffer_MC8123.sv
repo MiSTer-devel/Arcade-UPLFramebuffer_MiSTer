@@ -1,25 +1,10 @@
-//============================================================================
-//
-//  UPLFramebuffer_MC8123.sv - NEC MC-8123 sound CPU decryption, IN FLIGHT.
-//
-//  Transcribed from MAME src/devices/cpu/z80/mc8123.cpp (decrypt_internal and the
-//  eight decrypt_typeN networks). Purely combinational: type/swap/param fall out of
-//  XORs of the key byte, then one of eight bitswap-and-XOR chains selects the result.
-//
-//  Decryption runs on every sound-CPU fetch rather than once at load. `opcode` is the
-//  CPU's M1 and selects the opcode key table over the data table, so the same ROM byte
-//  decrypts two ways depending on how it is fetched.
-//
-//  Used by set_id 00 / 03 / 04 / 05 (ninjakd2, ninjakd2c, rdaction, jt104).
-//  Sets 01 / 02 are bootlegs that ship a plain decrypted opcode ROM instead.
-//
-//============================================================================
+//  Based on MAME mc8123.cpp (Nicola Salmoria, David Widel, BSD-3-Clause)
 
 module UPLFramebuffer_MC8123
 (
-    input        [7:0] val,        // byte as stored in the encrypted ROM
-    input        [7:0] key,        // key[tbl_num | (opcode ? 0x0000 : 0x1000)]
-    input              opcode,     // M1: opcode fetch selects the other key table
+    input        [7:0] val,
+    input        [7:0] key,
+    input              opcode,
     output       [7:0] dec
 );
 
@@ -149,7 +134,7 @@ module UPLFramebuffer_MC8123
             if (v[2]) v = v ^ 8'h0A;
             v = v ^ 8'h8E;
             if (param[3]) v = v ^ 8'h4A;
-            if (param[2]) v = v ^ 8'hEE;   // same as the other three combined
+            if (param[2]) v = v ^ 8'hEE;
             if (param[1]) v = v ^ 8'h80;
             if (param[0]) v = v ^ 8'h24;
             t2b = v;
@@ -212,8 +197,6 @@ module UPLFramebuffer_MC8123
         end
     endfunction
 
-    // The key is inverted first; an inverted-zero key (original 0xFF) means the byte
-    // is not encrypted.
     wire [7:0] k = ~key;
 
     wire [2:0] ktype = {k[4] ^ k[5],
@@ -225,7 +208,6 @@ module UPLFramebuffer_MC8123
                          k[0] ^ k[2] ^ k[3],
                          k[0]};
 
-    // a data fetch flips type bit 0 and param bit 0
     wire [2:0] t = {ktype[2:1],  ktype[0]  ^ ~opcode};
     wire [3:0] p = {kparam[3:1], kparam[0] ^ ~opcode};
 

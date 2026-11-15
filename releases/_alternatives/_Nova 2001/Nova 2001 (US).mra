@@ -32,8 +32,7 @@
         <dip bits="15" name="Service Mode" ids="On,Off"/>
     </switches>
 
-    <!-- Index 0: program 0000-6FFF (6000-7FFF mirrored in the core), then gfx1 at 0x8000 file by file
-         (the ROM_LOAD16_BYTE interleave is decoded in the core), then the palette PROM at 0x10000 -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="nova2001u.zip|nova2001.zip">
         <part name="nova2001.1" crc="b79461bd"/>
         <part name="nova2001.2" crc="fab87144"/>
@@ -47,7 +46,7 @@
         <part name="nova2001.clr" crc="a2fac5cd"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>12</part></rom>
 
     <remark>Nova 2001 (UPL, Universal license)</remark>

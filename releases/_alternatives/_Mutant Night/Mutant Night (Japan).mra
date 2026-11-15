@@ -35,7 +35,7 @@
         <dip bits="13,15" name="Coinage" ids="5 Coins/1 Credit,4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/4 Credits,1 Coin/3 Credits,1 Coin/2 Credits,1 Coin/1 Credit"/>
     </switches>
 
-    <!-- Index 0: Main CPU. 0x8000 fixed, then banks -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="mnight.zip|mnightj.zip">
         <part name="1.j19" crc="56678d14"/>
         <part name="2.j17" crc="2a73f88e"/>
@@ -44,31 +44,31 @@
         <part name="5.j12" crc="9c391d1b"/>
     </rom>
 
-    <!-- Index 1: Sound CPU -->
+    <!-- Index 1: ROM -->
     <rom index="1" md5="none" zip="mnight.zip|mnightj.zip">
         <part name="6.j7" crc="a0782a31"/>
     </rom>
 
-    <!-- Index 2: FG char ROM -->
+    <!-- Index 2: ROM -->
     <rom index="2" md5="none" zip="mnight.zip|mnightj.zip">
         <part name="13.b10" crc="37b8221f"/>
     </rom>
 
-    <!-- Index 6: Sprite ROM -->
+    <!-- Index 6: ROM -->
     <rom index="6" md5="none" zip="mnight.zip|mnightj.zip">
         <part name="9.e11" crc="4883059c"/>
         <part name="8.e12" crc="02b91445"/>
         <part name="7.e14" crc="9f08d160"/>
     </rom>
 
-    <!-- Index 7: BG tile ROM 1 -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="mnight.zip|mnightj.zip">
         <part name="12.b20" crc="4d37e0f4"/>
         <part name="11.b22" crc="b22cbbd3"/>
         <part name="10.b23" crc="65714070"/>
     </rom>
 
-    <!-- Index 5: game-select byte -->
+    <!-- Index 5: Config -->
     <rom index="5"><part>07</part></rom>
 
     <remark>Mutant Night (Japan)</remark>
